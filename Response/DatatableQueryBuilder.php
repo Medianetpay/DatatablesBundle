@@ -545,13 +545,58 @@ class DatatableQueryBuilder
     /**
      * Query results before filtering.
      *
+     * @param bool $setJoins
+     * @param bool $setDistinct
+     *
      * @return int
      */
-    public function getCountAllResults()
+    public function getCountAllResults($setJoins = true, $setDistinct = true)
     {
         $qb = clone $this->qb;
-        $qb->select('count(distinct '.$this->entityShortName.'.'.$this->rootEntityIdentifier.')');
-        $this->setJoins($qb);
+        if ($setDistinct) {
+            $qb->select('count(DISTINCT '.$this->entityShortName.'.'.$this->rootEntityIdentifier.')');
+        } else {
+            $qb->select('count('.$this->entityShortName.'.'.$this->rootEntityIdentifier.')');
+        }
+
+        if ($setJoins) {
+            $this->setJoins($qb);
+        }
+
+        $query = $qb->getQuery();
+        $query->useQueryCache($this->useCountQueryCache);
+        call_user_func_array([$query, 'useResultCache'], $this->useCountResultCacheArgs);
+
+        return !$qb->getDQLPart('groupBy')
+            ? (int) $query->getSingleScalarResult()
+            : count($query->getResult());
+    }
+
+    /**
+     * Query results after filtering.
+     *
+     * @param bool $requiredJoins
+     * @param bool $setDistinct
+     *
+     * @return int
+     */
+    public function getCountFilteredResults($requiredJoins = true, $setDistinct = true)
+    {
+        $qb = clone $this->qb;
+        if ($setDistinct) {
+            $qb->select('count(DISTINCT '.$this->entityShortName.'.'.$this->rootEntityIdentifier.')');
+        } else {
+            $qb->select('count('.$this->entityShortName.'.'.$this->rootEntityIdentifier.')');
+        }
+
+        // Is filtered by a field of other entity.
+        if ($requiredJoins || $this->isFilteredByJoinTable()) {
+            $this->setJoins($qb);
+        }
+
+        if ($this->isFiltered()) {
+            $this->setWhere($qb);
+        }
 
         $query = $qb->getQuery();
         $query->useQueryCache($this->useCountQueryCache);
@@ -624,9 +669,63 @@ class DatatableQueryBuilder
         return $this;
     }
 
+    /**
+     * Return if is there any filtering option set
+     *
+     * @return bool
+     */
+    public function isFiltered()
+    {
+        $globalFiltering = (isset($this->requestParams['search']) && '' !== $this->requestParams['search']['value']);
+        $individualFiltering = false;
+        foreach ($this->columns as $key => $column) {
+            if (true === $this->isSearchableColumn($column)) {
+                if (true === array_key_exists($key, $this->requestParams['columns'])) {
+                    $searchValue = $this->requestParams['columns'][$key]['search']['value'];
+
+                    if ('' !== $searchValue && 'null' !== $searchValue) {
+                        $individualFiltering = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        return $globalFiltering || $individualFiltering;
+    }
+
     //-------------------------------------------------
     // Private - Helper
     //-------------------------------------------------
+
+    /**
+     * Return if is there any filtering option set on a field of join table.
+     *
+     * @return bool
+     */
+    private function isFilteredByJoinTable()
+    {
+        $globalFiltering = (isset($this->requestParams['search']) && '' !== $this->requestParams['search']['value']);
+
+        $individualFiltering = false;
+        foreach ($this->columns as $key => $column) {
+            if (true === $this->isSearchableColumn($column)) {
+                if (true === array_key_exists($key, $this->requestParams['columns'])) {
+                    $searchEntity = explode('.', $this->searchColumns[$key])[0];
+                    if ($searchEntity !== $this->entityShortName) {
+                        $searchValue = $this->requestParams['columns'][$key]['search']['value'];
+
+                        if ('' !== $searchValue && 'null' !== $searchValue) {
+                            $individualFiltering = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        return $globalFiltering || $individualFiltering;
+    }
 
     /**
      * Set identifier from association.
