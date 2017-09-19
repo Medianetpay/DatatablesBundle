@@ -123,7 +123,7 @@ class DatatableResponse
      * @return JsonResponse
      * @throws Exception
      */
-    public function getResponse($countAllResults = true, $outputWalkers = false, $fetchJoinCollection = true)
+    public function getResponse($countAllResults = true, $outputWalkers = false, $fetchJoinCollection = true, $requiredJoins  = false, $setDistinct = false)
     {
         if (null === $this->datatable) {
             throw new Exception('DatatableResponse::getResponse(): Set a Datatable class with setDatatable().');
@@ -139,10 +139,17 @@ class DatatableResponse
         $formatter = new DatatableFormatter();
         $formatter->runFormatter($paginator, $this->datatable);
 
+        $filtered = $this->datatableQueryBuilder->getCountFilteredResults($requiredJoins, $setDistinct);
+        $recordsTotal = $filtered;
+
+        if (true === $countAllResults && $this->datatableQueryBuilder->isFiltered()) {
+            $recordsTotal = $this->datatableQueryBuilder->getCountAllResults($requiredJoins, $setDistinct);
+        }
+
         $outputHeader = array(
             'draw' => (int) $this->requestParams['draw'],
-            'recordsFiltered' => count($paginator),
-            'recordsTotal' => true === $countAllResults ? (int) $this->datatableQueryBuilder->getCountAllResults() : 0,
+            'recordsFiltered' => $filtered,
+            'recordsTotal' => $recordsTotal,
         );
 
         return new JsonResponse(array_merge($outputHeader, $formatter->getOutput()));
